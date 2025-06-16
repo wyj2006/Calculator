@@ -1,22 +1,24 @@
 #pragma once
 
 #include <QWidget>
-#include <QVector>
+#include <QPointF>
 #include <QPaintEvent>
 #include <QTimer>
+#include <QVector>
 
-#include "Generator.h"
+#include "Consumer.h"
 
 class Figure : public QWidget
 {
 public:
-    Figure(data_t, QPoint, QSize, QSize size = QSize(1000, 618));
+    Figure(relaptr_t, QWidget *parent = nullptr);
+    ~Figure();
 
     void paintEvent(QPaintEvent *);
 
-    data_t data;
-    QSize dsize; // data的size
-    QPoint o;    // 原点坐标
-    int data_index;
-    QTimer timer;
+    QPointF d; // dx和dy
+    QPoint o;  // 坐标原点在屏幕上的位置
+    relaptr_t relation;
+    QTimer *timer;
+    QVector<Consumer *> consumers;
 };

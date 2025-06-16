@@ -1,43 +1,70 @@
-#include <iostream>
 #include <QPainter>
+#include <QThreadPool>
 #include <QDebug>
-#include <QApplication>
-#include <cmath>
 
 #include "Figure.h"
 
-Figure::Figure(data_t data, QPoint o, QSize dsize, QSize size)
-    : data(data), dsize(dsize), o(o), timer(this)
+Figure::Figure(relaptr_t relation, QWidget *parent)
+    : QWidget(parent), relation(relation), d(0.01, 0.01), o(0, 0)
 {
-    resize(size);
-    data_index = 0;
-    connect(&timer, &QTimer::timeout, this, [&]()
-            {if(data_index++>=data.size())timer.stop();
-            update(); });
-    timer.start(1);
+    resize(100, 100);
+    for (int x = 0; x < width(); x++)
+    {
+        for (int y = 0; y < height(); y++)
+        {
+            QPointF p((x - o.x()) * d.x(), (y - o.y()) * d.y());
+            if (!points_sol.contains(p) && !tasks_que.contains(p))
+            {
+                points_sol[p] = std::make_tuple(false, true);
+                tasks_que.enqueue(p);
+            }
+        }
+    }
+
+    for (int i = 0; i < 1000; i++)
+    {
+        Consumer *t = new Consumer(relation, d, this);
+        consumers.push_back(t);
+        t->start();
+    }
+
+    timer = new QTimer(this);
+    connect(timer, &QTimer::timeout, this, [&]()
+            { update(); });
+    timer->start(1000);
 }
 
-void Figure::paintEvent(QPaintEvent *e)
+Figure::~Figure()
+{
+    for (auto t : consumers)
+        t->terminate();
+    if (!que_mutex.tryLock())
+        que_mutex.unlock();
+}
+
+void Figure::paintEvent(QPaintEvent *)
 {
     QPainter painter(this);
-    auto it = data.constBegin();
-    double w = (double)width() / dsize.width();
-    double h = (double)height() / dsize.height();
-    // qDebug() << w << h;
-    for (int i = 0; i < data_index && i < data.size(); i++)
+    for (int x = 0; x < width(); x++)
     {
-        auto point = data[i].second;
-        if (point == QPointF(1, 1))
-            painter.setBrush(QBrush(QColor(0, 0, 0)));
-        else if (point == QPointF(0, 1))
-            painter.setBrush(QBrush(QColor(255, 0, 0)));
-        else if (point == QPointF(0, 0))
-            painter.setBrush(QBrush(QColor(255, 255, 255)));
-        painter.setPen(painter.brush().color());
-        // qDebug() << data[i].first << point;
-        painter.drawRect((o.x() + data[i].first.x()) * w,
-                         (o.y() + ((double)dsize.height() - data[i].first.y())) * h,
-                         std::max(((data[i].first.width()) * w), 1.0),
-                         std::max(((data[i].first.height()) * h), 1.0));
+        for (int y = 0; y < height(); y++)
+        {
+            QPointF p((x - o.x()) * d.x(), (y - o.y()) * d.y());
+            if (!points_sol.contains(p) && !tasks_que.contains(p))
+            {
+                continue;
+            }
+            solution s = points_sol[p];
+            bool a = std::get<0>(s);
+            bool b = std::get<1>(s);
+            if (a == false && b == false)
+                painter.setBrush(QBrush(QColor(255, 255, 255)));
+            else if (a == false && b == true)
+                painter.setBrush(QBrush(QColor(255, 0, 0)));
+            else if (a == true && b == true)
+                painter.setBrush(QBrush(QColor(0, 0, 0)));
+            painter.setPen(painter.brush().color());
+            painter.drawPoint(x, y);
+        }
     }
 }
