@@ -1,0 +1,12 @@
+expr = { primary ~ (infix ~ primary)* }
+
+infix = _{ add | sub | mul | div | pow }
+add   =  { "+" }
+sub   =  { "-" }
+mul   =  { "*" }
+div   =  { "/" }
+pow   =  { "^" }
+
+primary = _{ symbol | number }
+symbol  =  { (ASCII_ALPHA | "_") ~ (ASCII_ALPHA | "_" | ASCII_DIGIT)* }
+number  =  { ASCII_DIGIT+ }

@@ -1,0 +1,11 @@
+[package]
+name = "calculator"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+bigdecimal = "0.4.10"
+indexmap = "2.13.0"
+num = "0.4.3"
+pest = "2.8.6"
+pest_derive = "2.8.6"
