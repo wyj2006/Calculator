@@ -15,6 +15,19 @@ fn main() {
         ("x".to_string(), Arc::clone(&x)),
         ("y".to_string(), Arc::clone(&y)),
     ]);
+
+    let a: Expr<Rational> = Expr::from_str("x^3+2*x+1", &mut symbols).unwrap();
+    let b = Expr::from_str("2*x+3", &mut symbols).unwrap();
+    let a = Polynomial::try_from(&a).unwrap();
+    let b = Polynomial::try_from(&b).unwrap();
+    let (q, r) = a.divmod(&b, &x);
+    println!("a={a}");
+    println!("b={b}");
+    println!("q={q}");
+    println!("r={r}");
+
+    println!();
+
     let a: Expr<Rational> = Expr::from_str("2*y^3-y^2+x^2*y", &mut symbols).unwrap();
     let b = Expr::from_str("x*y^2+1", &mut symbols).unwrap();
     let a = Polynomial::try_from(&a).unwrap();
@@ -25,4 +38,11 @@ fn main() {
     println!("q={q}");
     println!("r={r}");
     println!("s={s}");
+
+    println!();
+
+    let a: Expr<Rational> = Expr::from_str("x^3+1", &mut symbols).unwrap();
+    let a = Polynomial::try_from(&a).unwrap();
+    println!("a={a}");
+    println!("a'={}", a.diff(&x));
 }

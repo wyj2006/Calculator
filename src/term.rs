@@ -1,8 +1,8 @@
 use crate::{expr::Expr, forward_impl_binop, symbol::Symbol};
 use num::{BigUint, One, Zero, pow::Pow};
-use std::{collections::BTreeMap, fmt::Display, hash::Hash, ops::Mul, sync::Arc};
+use std::{cmp::Ordering, collections::BTreeMap, fmt::Display, hash::Hash, ops::Mul, sync::Arc};
 
-#[derive(Debug, Clone, Eq)]
+#[derive(Debug, Clone, Eq, Ord)]
 pub struct Term(pub BTreeMap<Arc<Symbol>, BigUint>);
 
 impl Term {
@@ -41,6 +41,19 @@ impl Hash for Term {
             }
             (sym, deg).hash(state);
         }
+    }
+}
+
+impl PartialOrd for Term {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        for (sym, deg) in &other.0 {
+            match self.degree(&sym).partial_cmp(deg) {
+                Some(Ordering::Greater) => return Some(Ordering::Greater),
+                Some(Ordering::Less) => return Some(Ordering::Less),
+                _ => {}
+            }
+        }
+        Some(Ordering::Equal)
     }
 }
 

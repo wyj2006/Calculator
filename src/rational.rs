@@ -24,12 +24,6 @@ impl TryFrom<Rational> for BigUint {
     }
 }
 
-// impl From<BigUint> for Rational {
-//     fn from(value: BigUint) -> Self {
-//         Rational(BigRational::from(BigInt::from(value)))
-//     }
-// }
-
 impl<T> From<T> for Rational
 where
     BigInt: From<T>,

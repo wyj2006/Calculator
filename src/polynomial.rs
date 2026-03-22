@@ -1,5 +1,4 @@
 use crate::{expr::Expr, forward_impl_binop, symbol::Symbol, term::Term};
-use indexmap::IndexMap;
 use num::{BigUint, One, Zero, pow::Pow};
 use std::{
     collections::BTreeMap,
@@ -9,7 +8,7 @@ use std::{
 };
 
 #[derive(Debug, Clone)]
-pub struct Polynomial<C>(pub IndexMap<Term, Expr<C>>);
+pub struct Polynomial<C>(pub BTreeMap<Term, Expr<C>>);
 
 impl<C> Zero for Polynomial<C>
 where
@@ -20,7 +19,7 @@ where
     }
 
     fn zero() -> Self {
-        Polynomial(IndexMap::from([(Term(BTreeMap::new()), Expr::zero())]))
+        Polynomial(BTreeMap::from([(Term(BTreeMap::new()), Expr::zero())]))
     }
 }
 
@@ -41,7 +40,7 @@ where
     }
 
     fn one() -> Self {
-        Polynomial(IndexMap::from([(Term(BTreeMap::new()), Expr::one())]))
+        Polynomial(BTreeMap::from([(Term(BTreeMap::new()), Expr::one())]))
     }
 }
 
@@ -93,7 +92,7 @@ where
 
 impl<C> Polynomial<C> {
     pub fn new_with_coef(coef: Expr<C>) -> Polynomial<C> {
-        Polynomial(IndexMap::from([(Term(BTreeMap::new()), coef)]))
+        Polynomial(BTreeMap::from([(Term(BTreeMap::new()), coef)]))
     }
 }
 
@@ -101,9 +100,9 @@ impl<C> Polynomial<C>
 where
     C: Zero + Clone + One + PartialEq + From<BigUint>,
 {
-    ///看成关于某一变元的一元多项式
+    ///看成关于symbol的一元多项式
     pub fn regard_as(&self, symbol: &Arc<Symbol>) -> Polynomial<C> {
-        let mut t = IndexMap::new();
+        let mut t = BTreeMap::new();
 
         for (term, coef) in &self.0 {
             let mut new_term = Term::empty();
@@ -118,6 +117,34 @@ where
                             Box::new(Expr::from(sym)),
                             Box::new(Expr::Const(C::from(deg.clone()))),
                         )
+                }
+            }
+
+            t.insert(new_term, new_coef);
+        }
+
+        Polynomial(t)
+    }
+
+    ///求导
+    pub fn diff(&self, symbol: &Arc<Symbol>) -> Polynomial<C> {
+        let mut t = BTreeMap::new();
+
+        for (term, coef) in &self.0 {
+            if term.0.len() == 0 {
+                //常数
+                continue;
+            }
+            let mut new_term = Term::empty();
+            let mut new_coef = coef.clone();
+
+            for (sym, deg) in &term.0 {
+                if *sym == *symbol {
+                    new_coef = new_coef * Expr::Const(C::from(deg.clone()));
+                    new_term.0.insert(Arc::clone(sym), deg - BigUint::one());
+                } else {
+                    //不看成关于symbol的一元多项式
+                    new_term.0.insert(Arc::clone(sym), deg.clone());
                 }
             }
 
@@ -199,8 +226,8 @@ where
 
     fn try_from(value: &Expr<C>) -> Result<Self, Self::Error> {
         match value.flatten() {
-            t @ Expr::Const(_) => Ok(Polynomial(IndexMap::from([(Term(BTreeMap::new()), t)]))),
-            Expr::Symbol(t) => Ok(Polynomial(IndexMap::from([(
+            t @ Expr::Const(_) => Ok(Polynomial::new_with_coef(t)),
+            Expr::Symbol(t) => Ok(Polynomial(BTreeMap::from([(
                 Term(BTreeMap::from([(t, BigUint::one())])),
                 Expr::Const(C::one()),
             )]))),
@@ -219,7 +246,7 @@ where
                 Ok(a)
             }
             Expr::Pow(a, b) => match (*a, *b) {
-                (Expr::Symbol(a), Expr::Const(b)) => Ok(Polynomial(IndexMap::from([(
+                (Expr::Symbol(a), Expr::Const(b)) => Ok(Polynomial(BTreeMap::from([(
                     Term(BTreeMap::from([(a, BigUint::try_from(b).map_err(|_| ())?)])),
                     Expr::Const(C::one()),
                 )]))),
@@ -236,7 +263,7 @@ where
     type Output = Polynomial<C>;
 
     fn add(self, rhs: &Polynomial<C>) -> Self::Output {
-        let mut t = IndexMap::new();
+        let mut t = BTreeMap::new();
 
         for (term, b) in self.0.iter().chain(&rhs.0) {
             match t.get(term) {
@@ -288,7 +315,7 @@ where
     type Output = Polynomial<C>;
 
     fn mul(self, rhs: &Polynomial<C>) -> Self::Output {
-        let mut t = IndexMap::new();
+        let mut t = BTreeMap::new();
 
         for (x1, x2) in &self.0 {
             for (y1, y2) in &rhs.0 {
@@ -316,6 +343,6 @@ where
     C: Zero + Clone + One + PartialEq,
 {
     fn from(value: &Term) -> Self {
-        Polynomial(IndexMap::from([(value.clone(), Expr::one())]))
+        Polynomial(BTreeMap::from([(value.clone(), Expr::one())]))
     }
 }

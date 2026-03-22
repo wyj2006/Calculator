@@ -211,11 +211,12 @@ where
         match (self.flatten(), rhs.flatten()) {
             (Expr::Const(a), Expr::Const(b)) => Expr::Const(a + b),
             (Expr::Add(mut a), b @ Expr::Const(_)) | (b @ Expr::Const(_), Expr::Add(mut a)) => {
-                let mut t = Vec::new();
+                let mut t = vec![b];
                 //与加法算式中的常量相加
                 while a.len() > 0 {
                     let x = a.remove(0);
                     if matches!(x, Expr::Const(_)) {
+                        let b = t.remove(0);
                         t.push(x + b);
                         break;
                     } else {
@@ -261,11 +262,12 @@ where
         match (self.flatten(), rhs.flatten()) {
             (Expr::Const(a), Expr::Const(b)) => Expr::Const(a * b),
             (Expr::Mul(mut a), b @ Expr::Const(_)) | (b @ Expr::Const(_), Expr::Mul(mut a)) => {
-                let mut t = Vec::new();
+                let mut t = vec![b];
                 //与乘法算式中的常量相乘
                 while a.len() > 0 {
                     let x = a.remove(0);
                     if matches!(x, Expr::Const(_)) {
+                        let b = t.remove(0);
                         t.push(x * b);
                         break;
                     } else {
@@ -380,14 +382,14 @@ where
     C: Zero + Clone + One + PartialEq + From<BigUint>,
 {
     fn from(value: &Term) -> Self {
-        let mut a = vec![];
+        let mut a = Expr::one();
         for (sym, deg) in &value.0 {
-            a.push(Expr::Pow(
+            a = a * Expr::Pow(
                 Box::new(Expr::from(sym)),
                 Box::new(Expr::Const(C::from(deg.clone()))),
-            ));
+            );
         }
-        Expr::Mul(a).flatten()
+        a
     }
 }
 
@@ -396,11 +398,11 @@ where
     C: Zero + Clone + One + PartialEq + From<BigUint>,
 {
     fn from(value: &Polynomial<C>) -> Self {
-        let mut a = Vec::new();
+        let mut a = Expr::zero();
         for (term, coef) in &value.0 {
-            a.push(Expr::Mul(vec![coef.clone(), Expr::from(term)]));
+            a = a + coef * Expr::from(term);
         }
-        Expr::Add(a).flatten()
+        a
     }
 }
 
