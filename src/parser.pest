@@ -7,6 +7,6 @@ mul   =  { "*" }
 div   =  { "/" }
 pow   =  { "^" }
 
-primary = _{ symbol | number }
+primary = _{ "(" ~ expr ~ ")" | symbol | number }
 symbol  =  { (ASCII_ALPHA | "_") ~ (ASCII_ALPHA | "_" | ASCII_DIGIT)* }
 number  =  { ASCII_DIGIT+ }

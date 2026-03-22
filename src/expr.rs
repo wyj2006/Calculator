@@ -32,8 +32,7 @@ where
         match (self.flatten(), other.flatten()) {
             (Expr::Const(a), Expr::Const(b)) => a == b,
             (Expr::Symbol(a), Expr::Symbol(b)) => a == b,
-            (Expr::Add(a), Expr::Add(b)) | (Expr::Mul(a), Expr::Mul(b)) => {
-                //如果 x==y, 那么 hash(x)==hash(y)
+            (Expr::Add(a), Expr::Add(b)) | (Expr::Mul(a), Expr::Mul(b)) if a.len() == b.len() => {
                 let mut t = a;
                 for i in b {
                     if let Some(k) = t.iter().position(|x| *x == i) {
@@ -229,6 +228,7 @@ where
                 }
                 Expr::Add(t).flatten()
             }
+            (a, b) if a == b => a * (Expr::one() + Expr::one()),
             (a, b) => Expr::Add(vec![a, b]).flatten(),
         }
     }
@@ -279,6 +279,10 @@ where
                     t.push(a.remove(0));
                 }
                 Expr::Mul(t).flatten()
+            }
+            (Expr::Add(a), b) | (b, Expr::Add(a)) => {
+                //运用分配律
+                Expr::Add(a.iter().map(|x| x * &b).collect()).flatten()
             }
             (a, b) => Expr::Mul(vec![a, b]).flatten(),
         }
@@ -421,32 +425,39 @@ where
         input: &str,
         symbols: &mut HashMap<String, Arc<Symbol>>,
     ) -> Result<Self, Error<Rule>> {
-        Ok(PRATT_PARSER
-            .map_primary(|primary| match primary.as_rule() {
-                Rule::symbol => {
-                    if let Some(t) = symbols.get(primary.as_str()) {
-                        Expr::from(t)
-                    } else {
-                        let sym = Arc::new(Symbol::new(primary.as_str()));
-                        symbols.insert(primary.as_str().to_string(), Arc::clone(&sym));
-                        Expr::from(&sym)
+        PRATT_PARSER
+            .map_primary(|primary| {
+                Ok(match primary.as_rule() {
+                    Rule::symbol => {
+                        if let Some(t) = symbols.get(primary.as_str()) {
+                            Expr::from(t)
+                        } else {
+                            let sym = Arc::new(Symbol::new(primary.as_str()));
+                            symbols.insert(primary.as_str().to_string(), Arc::clone(&sym));
+                            Expr::from(&sym)
+                        }
                     }
-                }
-                Rule::number => Expr::Const(match C::from_str(primary.as_str()) {
-                    Ok(t) => t,
-                    Err(_) => todo!(),
-                }),
-                _ => unreachable!(),
+                    Rule::number => Expr::Const(match C::from_str(primary.as_str()) {
+                        Ok(t) => t,
+                        Err(_) => todo!(),
+                    }),
+                    Rule::expr => Expr::from_str(primary.as_str(), symbols)?,
+                    _ => unreachable!(),
+                })
             })
-            .map_infix(|lhs, op, rhs| match op.as_rule() {
-                Rule::add => lhs + rhs,
-                Rule::sub => lhs - rhs,
-                Rule::mul => lhs * rhs,
-                Rule::div => lhs / rhs,
-                //TODO 或许有别的方式
-                Rule::pow => Expr::Pow(Box::new(lhs.flatten()), Box::new(rhs.flatten())).flatten(),
-                _ => unreachable!(),
+            .map_infix(|lhs, op, rhs| {
+                Ok(match op.as_rule() {
+                    Rule::add => lhs? + rhs?,
+                    Rule::sub => lhs? - rhs?,
+                    Rule::mul => lhs? * rhs?,
+                    Rule::div => lhs? / rhs?,
+                    //TODO 或许有别的方式
+                    Rule::pow => {
+                        Expr::Pow(Box::new(lhs?.flatten()), Box::new(rhs?.flatten())).flatten()
+                    }
+                    _ => unreachable!(),
+                })
             })
-            .parse(Self::parse(Rule::expr, input)?.next().unwrap().into_inner()))
+            .parse(Self::parse(Rule::expr, input)?.next().unwrap().into_inner())
     }
 }

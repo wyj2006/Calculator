@@ -1,5 +1,5 @@
-use crate::{expr::Expr, forward_impl_binop, symbol::Symbol, term::Term};
-use num::{BigUint, One, Zero, pow::Pow};
+use crate::{expr::Expr, forward_impl_binop, matrix::Matrix, symbol::Symbol, term::Term};
+use num::{BigUint, One, ToPrimitive, Zero, pow::Pow};
 use std::{
     collections::BTreeMap,
     fmt::Display,
@@ -75,9 +75,8 @@ impl<C> Polynomial<C>
 where
     C: Zero + Clone + One + PartialEq + From<BigUint>,
 {
-    pub fn leading_coef(&self, sym: &Arc<Symbol>) -> Expr<C> {
+    pub fn coef(&self, sym: &Arc<Symbol>, deg: BigUint) -> Expr<C> {
         let mut a = Expr::zero();
-        let deg = self.degree(sym);
         for (term, coef) in &self.0 {
             if term.degree(sym) != deg {
                 continue;
@@ -87,6 +86,42 @@ where
             a = a + coef * Expr::from(&term);
         }
         a
+    }
+
+    pub fn leading_coef(&self, sym: &Arc<Symbol>) -> Expr<C> {
+        self.coef(sym, self.degree(sym))
+    }
+}
+
+impl<C> Polynomial<C>
+where
+    C: Zero + Clone + One + PartialEq + From<BigUint> + Neg<Output = C>,
+{
+    ///Sylvester结式
+    pub fn resultant(&self, other: &Polynomial<C>, sym: &Arc<Symbol>) -> Expr<C> {
+        let m = self.degree(sym).to_usize().unwrap();
+        let l = other.degree(sym).to_usize().unwrap();
+        let mut matrix: Matrix<Expr<C>> = Matrix::new_zeros(m + l, m + l);
+
+        for i in 0..=m {
+            let a = self.coef(sym, BigUint::from(i));
+            for j in 0..l {
+                matrix[(j, m - i + j)] = a.clone();
+            }
+        }
+
+        for i in 0..=l {
+            let a = other.coef(sym, BigUint::from(i));
+            for j in 0..m {
+                matrix[(l + j, l - i + j)] = a.clone();
+            }
+        }
+
+        if m * l % 2 == 0 {
+            matrix.det()
+        } else {
+            -matrix.det()
+        }
     }
 }
 
