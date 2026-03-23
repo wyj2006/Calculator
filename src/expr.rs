@@ -31,12 +31,13 @@ where
     fn eq(&self, other: &Self) -> bool {
         match (self.flatten(), other.flatten()) {
             (Expr::Const(a), Expr::Const(b)) => a == b,
-            (Expr::Symbol(a), Expr::Symbol(b)) => a == b,
-            (Expr::Add(a), Expr::Add(b)) | (Expr::Mul(a), Expr::Mul(b)) if a.len() == b.len() => {
-                let mut t = a;
+            (Expr::Symbol(a), Expr::Symbol(b)) => *a == *b,
+            (Expr::Add(mut a), Expr::Add(b)) | (Expr::Mul(mut a), Expr::Mul(b))
+                if a.len() == b.len() =>
+            {
                 for i in b {
-                    if let Some(k) = t.iter().position(|x| *x == i) {
-                        t.remove(k);
+                    if let Some(k) = a.iter().position(|x| *x == i) {
+                        a.remove(k);
                     } else {
                         return false;
                     }
@@ -156,19 +157,45 @@ impl<C> Expr<C>
 where
     C: Zero + One + PartialEq + Clone,
 {
+    ///进行简单的化简
     pub fn flatten(&self) -> Expr<C> {
         match self {
             t if t.is_zero() => Expr::zero(),
             t if t.is_one() => Expr::one(),
             Expr::Add(t) => {
-                let mut a = vec![];
+                let mut non_consts = vec![];
+                let mut constant = C::zero();
+
                 for i in t {
                     match i.flatten() {
                         t if t.is_zero() => {}
-                        Expr::Add(t) => a.extend(t),
-                        t => a.push(t),
+                        Expr::Add(t) => non_consts.extend(t),
+                        Expr::Const(t) => constant = constant + t,
+                        t => non_consts.push(t),
                     }
                 }
+
+                let mut a = if constant.is_zero() {
+                    vec![]
+                } else {
+                    vec![Expr::Const(constant)]
+                };
+
+                //合并相同的元素
+                while non_consts.len() > 0 {
+                    let non_const = non_consts.remove(0);
+                    let mut count = C::one();
+                    while let Some(t) = non_consts.iter().position(|x| *x == non_const) {
+                        non_consts.remove(t);
+                        count = count + C::one();
+                    }
+                    if count.is_one() {
+                        a.push(non_const);
+                    } else {
+                        a.push(Expr::Mul(vec![non_const, Expr::Const(count)]));
+                    }
+                }
+
                 if a.len() == 0 {
                     Expr::zero()
                 } else if a.len() == 1 {
@@ -178,16 +205,41 @@ where
                 }
             }
             Expr::Mul(t) => {
-                let mut a = vec![];
+                let mut non_consts = vec![];
+                let mut constant = C::one();
+
                 for i in t {
                     match i.flatten() {
                         t if t.is_one() => {}
-                        Expr::Mul(t) => a.extend(t),
-                        t => a.push(t),
+                        Expr::Mul(t) => non_consts.extend(t),
+                        Expr::Const(t) => constant = constant * t,
+                        t => non_consts.push(t),
                     }
                 }
+
+                let mut a = if constant.is_one() {
+                    vec![]
+                } else {
+                    vec![Expr::Const(constant)]
+                };
+
+                //合并相同的元素
+                while non_consts.len() > 0 {
+                    let non_const = non_consts.remove(0);
+                    let mut count = C::one();
+                    while let Some(t) = non_consts.iter().position(|x| *x == non_const) {
+                        non_consts.remove(t);
+                        count = count + C::one();
+                    }
+                    if count.is_one() {
+                        a.push(non_const);
+                    } else {
+                        a.push(Expr::Pow(Box::new(non_const), Box::new(Expr::Const(count))));
+                    }
+                }
+
                 if a.len() == 0 {
-                    Expr::zero()
+                    Expr::one()
                 } else if a.len() == 1 {
                     a.remove(0)
                 } else {
@@ -208,27 +260,6 @@ where
 
     fn add(self, rhs: &Expr<C>) -> Self::Output {
         match (self.flatten(), rhs.flatten()) {
-            (Expr::Const(a), Expr::Const(b)) => Expr::Const(a + b),
-            (Expr::Add(mut a), b @ Expr::Const(_)) | (b @ Expr::Const(_), Expr::Add(mut a)) => {
-                let mut t = vec![b];
-                //与加法算式中的常量相加
-                while a.len() > 0 {
-                    let x = a.remove(0);
-                    if matches!(x, Expr::Const(_)) {
-                        let b = t.remove(0);
-                        t.push(x + b);
-                        break;
-                    } else {
-                        t.push(x);
-                    }
-                }
-                //剩余部分
-                while a.len() > 0 {
-                    t.push(a.remove(0));
-                }
-                Expr::Add(t).flatten()
-            }
-            (a, b) if a == b => a * (Expr::one() + Expr::one()),
             (a, b) => Expr::Add(vec![a, b]).flatten(),
         }
     }
@@ -260,28 +291,8 @@ where
 
     fn mul(self, rhs: &Expr<C>) -> Self::Output {
         match (self.flatten(), rhs.flatten()) {
-            (Expr::Const(a), Expr::Const(b)) => Expr::Const(a * b),
-            (Expr::Mul(mut a), b @ Expr::Const(_)) | (b @ Expr::Const(_), Expr::Mul(mut a)) => {
-                let mut t = vec![b];
-                //与乘法算式中的常量相乘
-                while a.len() > 0 {
-                    let x = a.remove(0);
-                    if matches!(x, Expr::Const(_)) {
-                        let b = t.remove(0);
-                        t.push(x * b);
-                        break;
-                    } else {
-                        t.push(x);
-                    }
-                }
-                //剩余部分
-                while a.len() > 0 {
-                    t.push(a.remove(0));
-                }
-                Expr::Mul(t).flatten()
-            }
+            //分配律
             (Expr::Add(a), b) | (b, Expr::Add(a)) => {
-                //运用分配律
                 Expr::Add(a.iter().map(|x| x * &b).collect()).flatten()
             }
             (a, b) => Expr::Mul(vec![a, b]).flatten(),

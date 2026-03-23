@@ -241,6 +241,31 @@ where
 
         (q, r, s)
     }
+
+    pub fn gcd(
+        &self,
+        rhs: &Polynomial<C>,
+        sym: &Arc<Symbol>,
+    ) -> (Polynomial<C>, Polynomial<C>, Polynomial<C>) {
+        let mut h = self.regard_as(sym);
+        let mut l = rhs.regard_as(sym);
+        let mut u = Self::zero();
+        let mut v = Self::one();
+        let mut a = Self::one();
+        let mut b = Self::zero();
+        while !l.is_zero() {
+            let (q, r) = h.divmod(&l, sym);
+            h = l;
+            l = r;
+            let c = a;
+            let d = b;
+            a = u.clone();
+            b = v.clone();
+            u = c - &q * u;
+            v = d - &q * v;
+        }
+        (h, a, b)
+    }
 }
 
 impl<C> Display for Polynomial<C>
