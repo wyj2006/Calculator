@@ -282,7 +282,7 @@ where
     C: Zero + One + PartialEq + Clone,
     BigUint: TryFrom<C>,
 {
-    type Error = ();
+    type Error = String;
 
     fn try_from(value: &Expr<C>) -> Result<Self, Self::Error> {
         match value.flatten() {
@@ -307,10 +307,16 @@ where
             }
             Expr::Pow(a, b) => match (*a, *b) {
                 (Expr::Symbol(a), Expr::Const(b)) => Ok(Polynomial(BTreeMap::from([(
-                    Term(BTreeMap::from([(a, BigUint::try_from(b).map_err(|_| ())?)])),
+                    Term(BTreeMap::from([(
+                        a,
+                        BigUint::try_from(b)
+                            .map_err(|_| format!("the exponent must be a positive integer"))?,
+                    )])),
                     Expr::Const(C::one()),
                 )]))),
-                _ => Err(()),
+                _ => Err(format!(
+                    "the base must be a symbol, and the exponent must be an constant"
+                )),
             },
         }
     }

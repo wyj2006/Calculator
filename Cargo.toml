@@ -4,7 +4,9 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+anyhow = "1.0.102"
 bigdecimal = "0.4.10"
 num = "0.4.3"
 pest = "2.8.6"
 pest_derive = "2.8.6"
+unicode-width = "0.2.2"

@@ -1,21 +1,12 @@
 use crate::{forward_impl_binop, polynomial::Polynomial, symbol::Symbol, term::Term};
 use num::{BigUint, One, Zero, pow::Pow};
-use pest::{
-    Parser,
-    error::Error,
-    pratt_parser::{Assoc, Op, PrattParser},
-};
-use pest_derive::Parser;
 use std::{
-    collections::HashMap,
     fmt::Display,
     ops::{Add, Div, Mul, Neg, Sub},
-    str::FromStr,
-    sync::{Arc, LazyLock},
+    sync::Arc,
 };
 
-#[derive(Debug, Clone, Parser)]
-#[grammar = "parser.pest"]
+#[derive(Debug, Clone)]
 pub enum Expr<C> {
     Const(C),
     Symbol(Arc<Symbol>),
@@ -29,14 +20,13 @@ where
     C: Zero + Clone + One + PartialEq,
 {
     fn eq(&self, other: &Self) -> bool {
-        match (self.flatten(), other.flatten()) {
+        match (self, other) {
             (Expr::Const(a), Expr::Const(b)) => a == b,
             (Expr::Symbol(a), Expr::Symbol(b)) => *a == *b,
-            (Expr::Add(mut a), Expr::Add(b)) | (Expr::Mul(mut a), Expr::Mul(b))
-                if a.len() == b.len() =>
-            {
+            (Expr::Add(a), Expr::Add(b)) | (Expr::Mul(a), Expr::Mul(b)) if a.len() == b.len() => {
+                let mut a = a.clone();
                 for i in b {
-                    if let Some(k) = a.iter().position(|x| *x == i) {
+                    if let Some(k) = a.iter().position(|x| *x == *i) {
                         a.remove(k);
                     } else {
                         return false;
@@ -68,16 +58,18 @@ where
                 }
             }
             Expr::Mul(t) => {
-                for (i, v) in t.iter().enumerate() {
-                    let s = v.to_string();
-                    if i > 0 {
-                        write!(f, "*")?;
-                    }
+                let mut has_neg = false;
+                let mut s = vec![];
+                for v in t.iter() {
+                    let a = v.to_string();
                     match v {
-                        Expr::Add(_) => write!(f, "({s})")?,
-                        _ => write!(f, "{s}")?,
+                        //直接比较字符串, 就不需要对C进行别的约束
+                        Expr::Const(_) if !has_neg && a == "-1" => has_neg = true,
+                        Expr::Add(_) => s.push(format!("({a})")),
+                        _ => s.push(a),
                     }
                 }
+                write!(f, "{}{}", if has_neg { "-" } else { "" }, s.join("*"))?;
             }
             Expr::Pow(a, b) => {
                 match **a {
@@ -163,13 +155,21 @@ where
             t if t.is_zero() => Expr::zero(),
             t if t.is_one() => Expr::one(),
             Expr::Add(t) => {
+                let mut a = vec![];
+                //先展开
+                for i in t {
+                    match i.flatten() {
+                        Expr::Add(t) => a.extend(t),
+                        t => a.push(t),
+                    }
+                }
+
                 let mut non_consts = vec![];
                 let mut constant = C::zero();
 
-                for i in t {
-                    match i.flatten() {
+                for i in a {
+                    match i {
                         t if t.is_zero() => {}
-                        Expr::Add(t) => non_consts.extend(t),
                         Expr::Const(t) => constant = constant + t,
                         t => non_consts.push(t),
                     }
@@ -192,7 +192,7 @@ where
                     if count.is_one() {
                         a.push(non_const);
                     } else {
-                        a.push(Expr::Mul(vec![non_const, Expr::Const(count)]));
+                        a.push(non_const * Expr::Const(count));
                     }
                 }
 
@@ -201,17 +201,27 @@ where
                 } else if a.len() == 1 {
                     a.remove(0)
                 } else {
-                    Expr::Add(a)
+                    let a = Expr::Add(a);
+                    //没有变化就不化简, 避免递归
+                    if *self == a { a } else { a.flatten() }
                 }
             }
             Expr::Mul(t) => {
+                let mut a = vec![];
+                //先展开
+                for i in t {
+                    match i.flatten() {
+                        Expr::Mul(t) => a.extend(t),
+                        t => a.push(t),
+                    }
+                }
+
                 let mut non_consts = vec![];
                 let mut constant = C::one();
 
-                for i in t {
-                    match i.flatten() {
+                for i in a {
+                    match i {
                         t if t.is_one() => {}
-                        Expr::Mul(t) => non_consts.extend(t),
                         Expr::Const(t) => constant = constant * t,
                         t => non_consts.push(t),
                     }
@@ -243,10 +253,13 @@ where
                 } else if a.len() == 1 {
                     a.remove(0)
                 } else {
-                    Expr::Mul(a)
+                    let a = Expr::Mul(a);
+                    //没有变化就不化简, 避免递归
+                    if *self == a { a } else { a.flatten() }
                 }
             }
             Expr::Pow(a, b) if b.is_one() => a.flatten(),
+            Expr::Pow(a, b) => Expr::Pow(Box::new(a.flatten()), Box::new(b.flatten())),
             _ => self.clone(),
         }
     }
@@ -291,10 +304,6 @@ where
 
     fn mul(self, rhs: &Expr<C>) -> Self::Output {
         match (self.flatten(), rhs.flatten()) {
-            //分配律
-            (Expr::Add(a), b) | (b, Expr::Add(a)) => {
-                Expr::Add(a.iter().map(|x| x * &b).collect()).flatten()
-            }
             (a, b) => Expr::Mul(vec![a, b]).flatten(),
         }
     }
@@ -418,57 +427,5 @@ where
             a = a + coef * Expr::from(term);
         }
         a
-    }
-}
-
-static PRATT_PARSER: LazyLock<PrattParser<Rule>> = LazyLock::new(|| {
-    PrattParser::new()
-        .op(Op::infix(Rule::add, Assoc::Left) | Op::infix(Rule::sub, Assoc::Left))
-        .op(Op::infix(Rule::mul, Assoc::Left) | Op::infix(Rule::div, Assoc::Left))
-        .op(Op::infix(Rule::pow, Assoc::Right))
-});
-
-impl<C> Expr<C>
-where
-    for<'a> C: FromStr + Zero + Clone + One + PartialEq + Neg<Output = C> + Div<Output = C>,
-{
-    pub fn from_str(
-        input: &str,
-        symbols: &mut HashMap<String, Arc<Symbol>>,
-    ) -> Result<Self, Error<Rule>> {
-        PRATT_PARSER
-            .map_primary(|primary| {
-                Ok(match primary.as_rule() {
-                    Rule::symbol => {
-                        if let Some(t) = symbols.get(primary.as_str()) {
-                            Expr::from(t)
-                        } else {
-                            let sym = Arc::new(Symbol::new(primary.as_str()));
-                            symbols.insert(primary.as_str().to_string(), Arc::clone(&sym));
-                            Expr::from(&sym)
-                        }
-                    }
-                    Rule::number => Expr::Const(match C::from_str(primary.as_str()) {
-                        Ok(t) => t,
-                        Err(_) => todo!(),
-                    }),
-                    Rule::expr => Expr::from_str(primary.as_str(), symbols)?,
-                    _ => unreachable!(),
-                })
-            })
-            .map_infix(|lhs, op, rhs| {
-                Ok(match op.as_rule() {
-                    Rule::add => lhs? + rhs?,
-                    Rule::sub => lhs? - rhs?,
-                    Rule::mul => lhs? * rhs?,
-                    Rule::div => lhs? / rhs?,
-                    //TODO 或许有别的方式
-                    Rule::pow => {
-                        Expr::Pow(Box::new(lhs?.flatten()), Box::new(rhs?.flatten())).flatten()
-                    }
-                    _ => unreachable!(),
-                })
-            })
-            .parse(Self::parse(Rule::expr, input)?.next().unwrap().into_inner())
     }
 }

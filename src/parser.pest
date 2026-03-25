@@ -1,3 +1,7 @@
+statement = { SOI ~ (assign | expr)? ~ EOI }
+
+assign = { identifier ~ "=" ~ expr }
+
 expr = { primary ~ (infix ~ primary)* }
 
 infix = _{ add | sub | mul | div | pow }
@@ -7,6 +11,13 @@ mul   =  { "*" }
 div   =  { "/" }
 pow   =  { "^" }
 
-primary = _{ "(" ~ expr ~ ")" | symbol | number }
-symbol  =  { (ASCII_ALPHA | "_") ~ (ASCII_ALPHA | "_" | ASCII_DIGIT)* }
-number  =  { ASCII_DIGIT+ }
+primary    = _{
+    call
+  | "(" ~ expr ~ ")"
+  | symbol
+  | number
+}
+symbol     =  { identifier }
+number     =  { ASCII_DIGIT+ }
+identifier =  { (ASCII_ALPHA | "_") ~ (ASCII_ALPHA | "_" | ASCII_DIGIT)* }
+call       =  { identifier ~ "(" ~ (expr ~ ("," ~ expr)*)? ~ ")" }
