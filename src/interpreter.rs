@@ -1,5 +1,6 @@
 use crate::{expr::Expr, polynomial::Polynomial, print::Print, symbol::Symbol};
 use anyhow::{Result, anyhow};
+use bigdecimal::Pow;
 use num::{BigUint, One, Zero};
 use pest::{
     Parser,
@@ -46,7 +47,8 @@ where
         + Display
         + From<BigUint>
         + Sub<Output = C>
-        + From<BigUint>,
+        + From<BigUint>
+        + Pow<Expr<C>, Output = Expr<C>>,
     <C as FromStr>::Err: Error,
     BigUint: TryFrom<C>,
 {
@@ -59,7 +61,7 @@ where
             match rule.as_rule() {
                 Rule::expr => {
                     let expr = Expr::<C>::from_str(rule.as_str(), &mut self.vars)?;
-                    expr.print();
+                    expr.simplify().print();
                 }
                 Rule::assign => {
                     let mut name = "";
@@ -92,7 +94,8 @@ where
         + Div<Output = C>
         + From<BigUint>
         + Sub<Output = C>
-        + From<BigUint>,
+        + From<BigUint>
+        + Pow<Expr<C>, Output = Expr<C>>,
     <C as FromStr>::Err: Error,
     BigUint: TryFrom<C>,
 {
@@ -232,6 +235,10 @@ where
                                     ))?,
                                 }
                             }
+                            "expand" => {
+                                let a = args.get(0).ok_or(anyhow!("too few arguments"))?;
+                                a.expand()
+                            }
                             _ => Err(anyhow!("unknown function: {name}"))?,
                         }
                     }
@@ -246,7 +253,7 @@ where
                     Rule::div => lhs? / rhs?,
                     //TODO 或许有别的方式
                     Rule::pow => {
-                        Expr::Pow(Box::new(lhs?.flatten()), Box::new(rhs?.flatten())).flatten()
+                        Expr::Pow(Box::new(lhs?.simplify()), Box::new(rhs?.simplify())).simplify()
                     }
                     _ => unreachable!(),
                 })

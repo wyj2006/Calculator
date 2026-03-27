@@ -1,4 +1,4 @@
-use crate::{expr::Expr, forward_impl_binop, symbol::Symbol};
+use crate::{expr::Expr, forward_impl_binop, rational::Rational, symbol::Symbol};
 use num::{BigUint, One, Zero, pow::Pow};
 use std::{cmp::Ordering, collections::BTreeMap, fmt::Display, hash::Hash, ops::Mul, sync::Arc};
 
@@ -59,7 +59,7 @@ impl PartialOrd for Term {
 
 impl Display for Term {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", Expr::<BigUint>::from(self))
+        write!(f, "{}", Expr::<Rational>::from(self))
     }
 }
 

@@ -89,7 +89,7 @@ where
 
 impl<C> Zero for Expr<C>
 where
-    C: Zero + One + PartialEq + Clone,
+    C: Zero + One + PartialEq + Clone + Pow<Expr<C>, Output = Expr<C>>,
 {
     fn is_zero(&self) -> bool {
         match self {
@@ -108,7 +108,7 @@ where
 
 impl<C> One for Expr<C>
 where
-    C: One + PartialEq + Zero + Clone,
+    C: One + PartialEq + Zero + Clone + Pow<Expr<C>, Output = Expr<C>>,
 {
     fn one() -> Self {
         Expr::Const(C::one())
@@ -147,83 +147,118 @@ where
 
 impl<C> Expr<C>
 where
-    C: Zero + One + PartialEq + Clone,
+    C: Zero + One + PartialEq + Clone + Pow<Expr<C>, Output = Expr<C>>,
 {
-    ///进行简单的化简
-    pub fn flatten(&self) -> Expr<C> {
-        match self {
+    pub fn simplify(&self) -> Expr<C> {
+        match self.flatten().evaluate().collect() {
             t if t.is_zero() => Expr::zero(),
             t if t.is_one() => Expr::one(),
+            Expr::Pow(a, b) if b.is_one() => *a,
+            t => t,
+        }
+    }
+
+    pub fn flatten(&self) -> Expr<C> {
+        match self {
             Expr::Add(t) => {
                 let mut a = vec![];
-                //先展开
                 for i in t {
                     match i.flatten() {
                         Expr::Add(t) => a.extend(t),
                         t => a.push(t),
                     }
                 }
-
-                let mut non_consts = vec![];
-                let mut constant = C::zero();
-
-                for i in a {
-                    match i {
-                        t if t.is_zero() => {}
-                        Expr::Const(t) => constant = constant + t,
-                        t => non_consts.push(t),
-                    }
-                }
-
-                let mut a = if constant.is_zero() {
-                    vec![]
-                } else {
-                    vec![Expr::Const(constant)]
-                };
-
-                //合并相同的元素
-                while non_consts.len() > 0 {
-                    let non_const = non_consts.remove(0);
-                    let mut count = C::one();
-                    while let Some(t) = non_consts.iter().position(|x| *x == non_const) {
-                        non_consts.remove(t);
-                        count = count + C::one();
-                    }
-                    if count.is_one() {
-                        a.push(non_const);
-                    } else {
-                        a.push(non_const * Expr::Const(count));
-                    }
-                }
-
                 if a.len() == 0 {
                     Expr::zero()
                 } else if a.len() == 1 {
                     a.remove(0)
                 } else {
-                    let a = Expr::Add(a);
-                    //没有变化就不化简, 避免递归
-                    if *self == a { a } else { a.flatten() }
+                    Expr::Add(a)
                 }
             }
             Expr::Mul(t) => {
                 let mut a = vec![];
-                //先展开
                 for i in t {
                     match i.flatten() {
                         Expr::Mul(t) => a.extend(t),
                         t => a.push(t),
                     }
                 }
+                if a.len() == 0 {
+                    Expr::one()
+                } else if a.len() == 1 {
+                    a.remove(0)
+                } else {
+                    Expr::Mul(a)
+                }
+            }
+            Expr::Pow(a, b) => Expr::Pow(Box::new(a.flatten()), Box::new(b.flatten())),
+            _ => self.clone(),
+        }
+    }
 
-                let mut non_consts = vec![];
+    pub fn collect(&self) -> Expr<C> {
+        match self {
+            Expr::Add(t) => {
+                let mut coefs = vec![];
+                for i in t {
+                    let (term, coef) = match i.collect() {
+                        Expr::Mul(t) => {
+                            let mut term = vec![];
+                            let mut coef = C::one();
+                            for i in t {
+                                match i {
+                                    Expr::Const(t) => coef = coef * t,
+                                    _ => term.push(i),
+                                }
+                            }
+                            (Expr::Mul(term).flatten(), coef)
+                        }
+                        t => (t, C::one()),
+                    };
+                    match coefs.iter().position(|x: &(Expr<C>, C)| x.0 == term) {
+                        Some(i) => {
+                            coefs.get_mut(i).unwrap().1 = coefs.get(i).unwrap().1.clone() + coef
+                        }
+                        None => coefs.push((term, coef)),
+                    }
+                }
+
+                let mut a = vec![];
+                for (term, coef) in coefs {
+                    if term.is_zero() || coef.is_zero() {
+                        continue;
+                    }
+                    if coef.is_one() {
+                        a.push(term);
+                    } else if term.is_one() {
+                        a.push(Expr::Const(coef));
+                    } else {
+                        a.push(term * Expr::Const(coef));
+                    }
+                }
+                Expr::Add(a).flatten()
+            }
+            Expr::Mul(t) => {
                 let mut constant = C::one();
-
-                for i in a {
-                    match i {
-                        t if t.is_one() => {}
-                        Expr::Const(t) => constant = constant * t,
-                        t => non_consts.push(t),
+                let mut exps = vec![];
+                for i in t {
+                    let (base, exp) = match i.collect() {
+                        Expr::Pow(a, b) => match *b {
+                            Expr::Const(c) => (*a, c),
+                            _ => (Expr::Pow(a, b), C::one()),
+                        },
+                        Expr::Const(t) => {
+                            constant = constant * t;
+                            continue;
+                        }
+                        t => (t, C::one()),
+                    };
+                    match exps.iter().position(|x: &(Expr<C>, C)| x.0 == base) {
+                        Some(i) => {
+                            exps.get_mut(i).unwrap().1 = exps.get(i).unwrap().1.clone() + exp
+                        }
+                        None => exps.push((base, exp)),
                     }
                 }
 
@@ -232,145 +267,215 @@ where
                 } else {
                     vec![Expr::Const(constant)]
                 };
-
-                //合并相同的元素
-                while non_consts.len() > 0 {
-                    let non_const = non_consts.remove(0);
-                    let mut count = C::one();
-                    while let Some(t) = non_consts.iter().position(|x| *x == non_const) {
-                        non_consts.remove(t);
-                        count = count + C::one();
+                for (base, exp) in exps {
+                    if base.is_one() || exp.is_zero() {
+                        continue;
                     }
-                    if count.is_one() {
-                        a.push(non_const);
+                    if exp.is_one() {
+                        a.push(base);
                     } else {
-                        a.push(Expr::Pow(Box::new(non_const), Box::new(Expr::Const(count))));
+                        a.push(Expr::Pow(Box::new(base), Box::new(Expr::Const(exp))));
+                    }
+                }
+                Expr::Mul(a).flatten()
+            }
+            Expr::Pow(a, b) => Expr::Pow(Box::new(a.collect()), Box::new(b.collect())),
+            _ => self.clone(),
+        }
+    }
+
+    pub fn evaluate(&self) -> Expr<C> {
+        match self {
+            Expr::Add(t) => {
+                let mut a = vec![];
+                let mut constant = C::zero();
+                for i in t {
+                    match i.evaluate() {
+                        Expr::Const(t) => constant = constant + t,
+                        t => a.push(t),
+                    }
+                }
+                if !constant.is_zero() {
+                    a.push(Expr::Const(constant));
+                }
+                Expr::Add(a).flatten()
+            }
+            Expr::Mul(t) => {
+                let mut a = vec![];
+                let mut constant = C::one();
+                for i in t {
+                    match i.evaluate() {
+                        Expr::Const(t) => constant = constant * t,
+                        t => a.push(t),
+                    }
+                }
+                if !constant.is_one() {
+                    a.push(Expr::Const(constant));
+                }
+                Expr::Mul(a).flatten()
+            }
+            Expr::Pow(a, b) => match (a.evaluate(), b.evaluate()) {
+                (Expr::Const(a), b) => a.pow(b),
+                (a, b) => Expr::Pow(Box::new(a), Box::new(b)),
+            }
+            .flatten(),
+            _ => self.clone(),
+        }
+    }
+
+    pub fn expand(&self) -> Expr<C> {
+        match self.simplify() {
+            Expr::Add(t) => Expr::Add(t.iter().map(|x| x.expand()).collect()).simplify(),
+            Expr::Mul(t) => {
+                let mut a = vec![];
+
+                for i in t {
+                    match i.expand().simplify() {
+                        Expr::Add(t) => {
+                            if a.len() == 0 {
+                                a.extend(t);
+                            } else {
+                                let mut b = vec![];
+                                for i in &t {
+                                    for j in &a {
+                                        b.push(i * j);
+                                    }
+                                }
+                                a = b;
+                            }
+                        }
+                        t => {
+                            if a.len() == 0 {
+                                a.push(t);
+                            } else {
+                                let mut b = vec![];
+                                for i in &a {
+                                    b.push(i * &t);
+                                }
+                                a = b;
+                            }
+                        }
                     }
                 }
 
-                if a.len() == 0 {
-                    Expr::one()
-                } else if a.len() == 1 {
-                    a.remove(0)
-                } else {
-                    let a = Expr::Mul(a);
-                    //没有变化就不化简, 避免递归
-                    if *self == a { a } else { a.flatten() }
-                }
+                Expr::Add(a).simplify()
             }
-            Expr::Pow(a, b) if b.is_one() => a.flatten(),
-            Expr::Pow(a, b) => Expr::Pow(Box::new(a.flatten()), Box::new(b.flatten())),
-            _ => self.clone(),
+            Expr::Pow(a, b) => match *b {
+                Expr::Const(t) => {
+                    //TODO 展开
+                    Expr::Pow(Box::new(a.expand()), Box::new(Expr::Const(t))).simplify()
+                }
+                b => Expr::Pow(Box::new(a.expand()), Box::new(b.expand())).simplify(),
+            },
+            t => t,
         }
     }
 }
 
 impl<C> Add<&Expr<C>> for &Expr<C>
 where
-    C: Zero + Clone + One + PartialEq,
+    C: Zero + Clone + One + PartialEq + Pow<Expr<C>, Output = Expr<C>>,
 {
     type Output = Expr<C>;
 
     fn add(self, rhs: &Expr<C>) -> Self::Output {
-        match (self.flatten(), rhs.flatten()) {
-            (a, b) => Expr::Add(vec![a, b]).flatten(),
-        }
+        Expr::Add(vec![self.clone(), rhs.clone()]).simplify()
     }
 }
 
-forward_impl_binop!(impl<C> Add for Expr<C>, add, where C: Zero + Clone + One + PartialEq);
+forward_impl_binop!(impl<C> Add for Expr<C>, add, where C: Zero + Clone + One + PartialEq + Pow<Expr<C>, Output = Expr<C>>);
 
 impl<C> Sub<&Expr<C>> for &Expr<C>
 where
-    C: Zero + Clone + One + PartialEq + Neg<Output = C>,
+    C: Zero + Clone + One + PartialEq + Neg<Output = C> + Pow<Expr<C>, Output = Expr<C>>,
 {
     type Output = Expr<C>;
 
     fn sub(self, rhs: &Expr<C>) -> Self::Output {
-        match (self.flatten(), rhs.flatten()) {
-            (a, b) if a == b => Expr::zero(),
-            (a, b) => a + b * Expr::Const(-C::one()),
-        }
-    }
-}
-
-forward_impl_binop!(impl<C> Sub for Expr<C>, sub, where C: Zero + Clone + One + PartialEq + Neg<Output = C>);
-
-impl<C> Mul<&Expr<C>> for &Expr<C>
-where
-    C: Zero + Clone + One + PartialEq,
-{
-    type Output = Expr<C>;
-
-    fn mul(self, rhs: &Expr<C>) -> Self::Output {
-        match (self.flatten(), rhs.flatten()) {
-            (a, b) => Expr::Mul(vec![a, b]).flatten(),
-        }
-    }
-}
-
-forward_impl_binop!(impl<C> Mul for Expr<C>,mul,where C: Zero + Clone + One + PartialEq);
-
-impl<C> Div<&Expr<C>> for &Expr<C>
-where
-    C: Div<Output = C> + Zero + Clone + One + PartialEq + Neg<Output = C>,
-{
-    type Output = Expr<C>;
-
-    fn div(self, rhs: &Expr<C>) -> Self::Output {
-        match (self.flatten(), rhs.flatten()) {
-            (Expr::Const(a), Expr::Const(b)) => Expr::Const(a / b),
-            (a, b) if a == b => Expr::one(),
-            (a, b) => a * Expr::Pow(Box::new(b), Box::new(Expr::Const(-C::one()))),
-        }
-    }
-}
-
-forward_impl_binop!(impl<C> Div for Expr<C>,div,where C: Div<Output = C> + Zero + Clone + One + PartialEq + Neg<Output = C>);
-
-impl<CL, CR> Pow<&Expr<CR>> for &Expr<CL>
-where
-    CL: Zero + Clone + One + PartialEq + Pow<CR, Output = CL>,
-    CR: Zero + Clone + One + PartialEq,
-    Expr<CL>: From<Expr<CR>>,
-{
-    type Output = Expr<CL>;
-
-    fn pow(self, rhs: &Expr<CR>) -> Self::Output {
-        match (self.flatten(), rhs.flatten()) {
-            (Expr::Const(a), Expr::Const(b)) => Expr::Const(a.pow(b)),
-            (a, b) => Expr::Pow(Box::new(a), Box::new(b.into())).flatten(),
-        }
+        Expr::Add(vec![self.clone(), -rhs.clone()]).simplify()
     }
 }
 
 forward_impl_binop!(
-    impl<CL, CR> Pow<Expr<CR>> for Expr<CL>,
+    impl<C> Sub for Expr<C>,
+    sub,
+    where
+        C: Zero + Clone + One + PartialEq + Neg<Output = C> + Pow<Expr<C>, Output = Expr<C>>
+);
+
+impl<C> Mul<&Expr<C>> for &Expr<C>
+where
+    C: Zero + Clone + One + PartialEq + Pow<Expr<C>, Output = Expr<C>>,
+{
+    type Output = Expr<C>;
+
+    fn mul(self, rhs: &Expr<C>) -> Self::Output {
+        Expr::Mul(vec![self.clone(), rhs.clone()]).simplify()
+    }
+}
+
+forward_impl_binop!(impl<C> Mul for Expr<C>,mul,where C: Zero + Clone + One + PartialEq + Pow<Expr<C>, Output = Expr<C>>);
+
+impl<C> Div<&Expr<C>> for &Expr<C>
+where
+    C: Div<Output = C>
+        + Zero
+        + Clone
+        + One
+        + PartialEq
+        + Neg<Output = C>
+        + Pow<Expr<C>, Output = Expr<C>>,
+{
+    type Output = Expr<C>;
+
+    fn div(self, rhs: &Expr<C>) -> Self::Output {
+        Expr::Mul(vec![
+            self.clone(),
+            Expr::Pow(Box::new(rhs.clone()), Box::new(Expr::Const(-C::one()))),
+        ])
+        .simplify()
+    }
+}
+
+forward_impl_binop!(
+    impl<C> Div for Expr<C>,
+    div,
+    where
+        C: Div<Output = C> + Zero + Clone + One + PartialEq + Neg<Output = C> + Pow<Expr<C>, Output = Expr<C>>
+);
+
+impl<C> Pow<&Expr<C>> for &Expr<C>
+where
+    C: Zero + Clone + One + PartialEq + Pow<Expr<C>, Output = Expr<C>>,
+{
+    type Output = Expr<C>;
+
+    fn pow(self, rhs: &Expr<C>) -> Self::Output {
+        Expr::Pow(Box::new(self.clone()), Box::new(rhs.clone())).simplify()
+    }
+}
+
+forward_impl_binop!(
+    impl<C> Pow for Expr<C>,
     pow,
     where
-        CL: Zero + Clone + One + PartialEq + Pow<CR, Output = CL>,
-        CR: Zero + Clone + One + PartialEq,
-        Expr<CL>: From<Expr<CR>>,
+        C: Zero + Clone + One + PartialEq + Pow<Expr<C>, Output = Expr<C>>
 );
 
 impl<C> Neg for &Expr<C>
 where
-    C: Neg<Output = C> + Clone + Zero + One + PartialEq,
+    C: Neg<Output = C> + Clone + Zero + One + PartialEq + Pow<Expr<C>, Output = Expr<C>>,
 {
     type Output = Expr<C>;
 
     fn neg(self) -> Self::Output {
-        match self.flatten() {
-            Expr::Const(t) => Expr::Const(-t),
-            Expr::Add(t) => Expr::Add(t.iter().map(|x| x * -Expr::one()).collect()).flatten(),
-            t => -Expr::one() * t,
-        }
+        Expr::Mul(vec![Expr::Const(-C::one()), self.clone()]).simplify()
     }
 }
 
 impl<C> Neg for Expr<C>
 where
-    C: Neg<Output = C> + Clone + Zero + One + PartialEq,
+    C: Neg<Output = C> + Clone + Zero + One + PartialEq + Pow<Expr<C>, Output = Expr<C>>,
 {
     type Output = Expr<C>;
 
@@ -403,7 +508,7 @@ impl<C> From<&Arc<Symbol>> for Expr<C> {
 
 impl<C> From<&Term> for Expr<C>
 where
-    C: Zero + Clone + One + PartialEq + From<BigUint>,
+    C: Zero + Clone + One + PartialEq + From<BigUint> + Pow<Expr<C>, Output = Expr<C>>,
 {
     fn from(value: &Term) -> Self {
         let mut a = Expr::one();
@@ -419,7 +524,7 @@ where
 
 impl<C> From<&Polynomial<C>> for Expr<C>
 where
-    C: Zero + Clone + One + PartialEq + From<BigUint>,
+    C: Zero + Clone + One + PartialEq + From<BigUint> + Pow<Expr<C>, Output = Expr<C>>,
 {
     fn from(value: &Polynomial<C>) -> Self {
         let mut a = Expr::zero();

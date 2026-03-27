@@ -1,12 +1,13 @@
+use crate::expr::Expr;
+use bigdecimal::{BigDecimal, Pow};
+use num::{
+    BigInt, BigRational, BigUint, Integer, One, Signed, Zero, bigint::TryFromBigIntError,
+    rational::ParseRatioError,
+};
 use std::{
     fmt::Display,
     ops::{Add, Div, Mul, Neg, Sub},
     str::FromStr,
-};
-
-use bigdecimal::BigDecimal;
-use num::{
-    BigInt, BigRational, BigUint, One, Zero, bigint::TryFromBigIntError, rational::ParseRatioError,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
@@ -107,5 +108,33 @@ impl Neg for Rational {
 
     fn neg(self) -> Self::Output {
         Rational(-self.0)
+    }
+}
+
+impl Pow<Expr<Rational>> for Rational {
+    type Output = Expr<Rational>;
+
+    fn pow(self, rhs: Expr<Rational>) -> Self::Output {
+        match rhs {
+            Expr::Const(t) if *t.0.denom() == BigInt::one() => {
+                let mut a = BigRational::one();
+                let (base, mut exp) = if t.0.is_negative() {
+                    (self.0.recip(), -t.0.numer().clone())
+                } else {
+                    (self.0, t.0.numer().clone())
+                };
+                let mut b = base.clone();
+                while exp > BigInt::zero() {
+                    if exp.is_odd() {
+                        a *= &b;
+                    }
+                    b *= &base;
+                    exp = exp.div_rem(&BigInt::from(2)).0;
+                }
+                Expr::Const(Rational(a))
+            }
+            _ if self.is_one() => rhs,
+            _ => Expr::Pow(Box::new(Expr::Const(self)), Box::new(rhs)),
+        }
     }
 }

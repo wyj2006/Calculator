@@ -12,7 +12,7 @@ pub struct Polynomial<C>(pub BTreeMap<Term, Expr<C>>);
 
 impl<C> Zero for Polynomial<C>
 where
-    C: Zero + Clone + One + PartialEq,
+    C: Zero + Clone + One + PartialEq + Pow<Expr<C>, Output = Expr<C>>,
 {
     fn is_zero(&self) -> bool {
         self.0.values().all(|x| x.is_zero())
@@ -25,7 +25,7 @@ where
 
 impl<C> One for Polynomial<C>
 where
-    C: Zero + Clone + One + PartialEq,
+    C: Zero + Clone + One + PartialEq + Pow<Expr<C>, Output = Expr<C>>,
 {
     fn is_one(&self) -> bool {
         for (term, coef) in &self.0 {
@@ -46,7 +46,7 @@ where
 
 impl<C> Polynomial<C>
 where
-    C: Zero + Clone + One + PartialEq,
+    C: Zero + Clone + One + PartialEq + Pow<Expr<C>, Output = Expr<C>>,
 {
     pub fn degree(&self, sym: &Arc<Symbol>) -> BigUint {
         let mut deg = BigUint::zero();
@@ -73,7 +73,7 @@ where
 
 impl<C> Polynomial<C>
 where
-    C: Zero + Clone + One + PartialEq + From<BigUint>,
+    C: Zero + Clone + One + PartialEq + From<BigUint> + Pow<Expr<C>, Output = Expr<C>>,
 {
     pub fn coef(&self, sym: &Arc<Symbol>, deg: BigUint) -> Expr<C> {
         let mut a = Expr::zero();
@@ -95,7 +95,13 @@ where
 
 impl<C> Polynomial<C>
 where
-    C: Zero + Clone + One + PartialEq + From<BigUint> + Neg<Output = C>,
+    C: Zero
+        + Clone
+        + One
+        + PartialEq
+        + From<BigUint>
+        + Neg<Output = C>
+        + Pow<Expr<C>, Output = Expr<C>>,
 {
     ///Sylvester结式
     pub fn resultant(&self, other: &Polynomial<C>, sym: &Arc<Symbol>) -> Expr<C> {
@@ -133,7 +139,7 @@ impl<C> Polynomial<C> {
 
 impl<C> Polynomial<C>
 where
-    C: Zero + Clone + One + PartialEq + From<BigUint>,
+    C: Zero + Clone + One + PartialEq + From<BigUint> + Pow<Expr<C>, Output = Expr<C>>,
 {
     ///看成关于symbol的一元多项式
     pub fn regard_as(&self, symbol: &Arc<Symbol>) -> Polynomial<C> {
@@ -199,7 +205,8 @@ where
         + From<BigUint>
         + Sub<Output = C>
         + Neg<Output = C>
-        + Div<Output = C>,
+        + Div<Output = C>
+        + Pow<Expr<C>, Output = Expr<C>>,
 {
     pub fn divmod(&self, rhs: &Polynomial<C>, sym: &Arc<Symbol>) -> (Polynomial<C>, Polynomial<C>) {
         let mut q = Self::zero();
@@ -209,10 +216,16 @@ where
         let l = g.degree(sym);
 
         while r.degree(sym) >= l {
+            let d = r.degree(sym);
             let a = Polynomial::new_with_coef(r.leading_coef(sym) / g.leading_coef(sym))
-                * Self::from(&Term::from(sym).pow(r.degree(sym) - &l));
+                * Self::from(&Term::from(sym).pow(&d - &l));
             r = r - &a * &g;
-            q = q + a;
+            //移除最高次项
+            r.0.retain(|term, _| match term.0.get(sym) {
+                Some(t) if *t == d => false,
+                _ => true,
+            });
+            q = q + &a;
         }
 
         (q, r)
@@ -270,7 +283,7 @@ where
 
 impl<C> Display for Polynomial<C>
 where
-    C: Display + Zero + Clone + One + PartialEq + From<BigUint>,
+    C: Display + Zero + Clone + One + PartialEq + From<BigUint> + Pow<Expr<C>, Output = Expr<C>>,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", Expr::from(self))
@@ -279,13 +292,13 @@ where
 
 impl<C> TryFrom<&Expr<C>> for Polynomial<C>
 where
-    C: Zero + One + PartialEq + Clone,
+    C: Zero + One + PartialEq + Clone + Pow<Expr<C>, Output = Expr<C>>,
     BigUint: TryFrom<C>,
 {
     type Error = String;
 
     fn try_from(value: &Expr<C>) -> Result<Self, Self::Error> {
-        match value.flatten() {
+        match value.expand() {
             t @ Expr::Const(_) => Ok(Polynomial::new_with_coef(t)),
             Expr::Symbol(t) => Ok(Polynomial(BTreeMap::from([(
                 Term(BTreeMap::from([(t, BigUint::one())])),
@@ -324,7 +337,7 @@ where
 
 impl<C> Add<&Polynomial<C>> for &Polynomial<C>
 where
-    C: Zero + Clone + One + PartialEq,
+    C: Zero + Clone + One + PartialEq + Pow<Expr<C>, Output = Expr<C>>,
 {
     type Output = Polynomial<C>;
 
@@ -334,7 +347,7 @@ where
         for (term, b) in self.0.iter().chain(&rhs.0) {
             match t.get(term) {
                 Some(a) => t.insert(term.clone(), a + b),
-                None => t.insert(term.clone(), b.flatten()),
+                None => t.insert(term.clone(), b.simplify()),
             };
         }
 
@@ -345,12 +358,18 @@ where
 forward_impl_binop!(
     impl<C> Add for Polynomial<C>,
     add,
-    where C: Zero + Clone + One + PartialEq
+    where C: Zero + Clone + One + PartialEq + Pow<Expr<C>, Output = Expr<C>>
 );
 
 impl<C> Sub<&Polynomial<C>> for &Polynomial<C>
 where
-    C: Zero + Clone + One + PartialEq + Sub<Output = C> + Neg<Output = C>,
+    C: Zero
+        + Clone
+        + One
+        + PartialEq
+        + Sub<Output = C>
+        + Neg<Output = C>
+        + Pow<Expr<C>, Output = Expr<C>>,
 {
     type Output = Polynomial<C>;
 
@@ -360,7 +379,7 @@ where
         for (term, b) in &rhs.0 {
             match t.get(term) {
                 Some(a) => t.insert(term.clone(), a - b),
-                None => t.insert(term.clone(), -b.flatten()),
+                None => t.insert(term.clone(), -b.simplify()),
             };
         }
 
@@ -371,12 +390,12 @@ where
 forward_impl_binop!(
     impl<C> Sub for Polynomial<C>,
     sub,
-    where C: Zero + Clone + One + PartialEq + Sub<Output = C> + Neg<Output = C>,
+    where C: Zero + Clone + One + PartialEq + Sub<Output = C> + Neg<Output = C> + Pow<Expr<C>, Output = Expr<C>>
 );
 
 impl<C> Mul<&Polynomial<C>> for &Polynomial<C>
 where
-    C: Zero + Clone + One + PartialEq,
+    C: Zero + Clone + One + PartialEq + Pow<Expr<C>, Output = Expr<C>>,
 {
     type Output = Polynomial<C>;
 
@@ -401,12 +420,12 @@ where
 forward_impl_binop!(
     impl<C> Mul for Polynomial<C>,
     mul,
-    where C: Zero + Clone + One + PartialEq
+    where C: Zero + Clone + One + PartialEq + Pow<Expr<C>, Output = Expr<C>>
 );
 
 impl<C> From<&Term> for Polynomial<C>
 where
-    C: Zero + Clone + One + PartialEq,
+    C: Zero + Clone + One + PartialEq + Pow<Expr<C>, Output = Expr<C>>,
 {
     fn from(value: &Term) -> Self {
         Polynomial(BTreeMap::from([(value.clone(), Expr::one())]))
